@@ -12,7 +12,7 @@
     "node": "~0.10"
   },
   "dependencies": {
-    "q": "^1.0.0",
+    "qq": "git+https://blambo@bitbucket.org/blambo/qq.git",
     "mongoose": "^3.8.3"
   },
   "devDependencies": {

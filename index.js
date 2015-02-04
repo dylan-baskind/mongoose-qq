@@ -1,7 +1,7 @@
 'use strict';
 
 var
-  Q = require('q'),
+  Q = require('qq'),
   MONGOOSE_MODEL_STATICS = [
     // mongoose.Model static
     'remove', 'ensureIndexes', 'find', 'findById', 'findOne', 'count', 'distinct',
