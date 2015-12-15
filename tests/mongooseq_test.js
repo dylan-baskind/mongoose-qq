@@ -8,53 +8,11 @@ var
     },
     // NOTE: without spread option!
     mongoose = require('../index')(require('mongoose'), {mapper: customMapper}),
-    Schema = mongoose.Schema,
-    UserSchema = new Schema({
-        name: String
-    }),
-    UserModel = mongoose.model('User', UserSchema),
-    PostSchema = new Schema({
-        title: String,
-        author: {type: Schema.Types.ObjectId, ref: 'User'}
-    }),
-    PostModel,
-    MONGOOSE_MODEL_STATICS = [
-        // mongoose.Model static
-        'remove', 'ensureIndexes', 'find', 'findById', 'findOne', 'count', 'distinct',
-        'findOneAndUpdate', 'findByIdAndUpdate', 'findOneAndRemove', 'findByIdAndRemove',
-        'create', 'update', 'mapReduce', 'aggregate', 'populate',
-        // mongoose.Document static
-        'update'
-    ],
-    MONGOOSE_MODEL_METHODS = [
-        // mongoose.Model instance
-        'save', 'remove',
-        // mongoose.Document instance
-        'populate', 'update', 'validate'
-    ],
-    MONGOOSE_QUERY_METHODS = [
-        // mongoose.Query instance
-        'find', 'exec', 'findOne', 'count', 'distinct', 'update', 'remove',
-        'findOneAndUpdate', 'findOneAndRemove', 'lean', 'limit', 'skip', 'sort'
-    ],
-    MONGOOSE_AGGREGATE_METHODS = [
-        'exec'
-    ],
-    debug = console.log.bind(console);
-
-PostSchema.plugin(function (schema) {
-    schema.pre('save', function (next) {
-        debug('*** pre save', this);
-        PostSchema.__pre_save_called = true;
-        next();
-    });
-    schema.post('save', function (doc) {
-        debug('*** post save', doc);
-        PostSchema.__post_save_called = true;
-    });
-}, {});
-
-PostModel = mongoose.model('Post', PostSchema);
+    funcNames = require('../func_names'),
+    schemas = require('./schemas'),
+    UserModel = mongoose.model('User', schemas.UserSchema),
+    PostModel = mongoose.model('Post', schemas.PostSchema),
+    debug = require('debug')('test');
 
 describe('mongooseq', function () {
     beforeEach(function (done) {
@@ -71,28 +29,28 @@ describe('mongooseq', function () {
         done();
     });
     it('should wrap model statics', function () {
-        MONGOOSE_MODEL_STATICS.forEach(function (funcName) {
+        funcNames.MODEL_STATICS.forEach(function (funcName) {
             debug(funcName);
             assert(typeof UserModel[customMapper(funcName)] === 'function');
         });
     });
     it('should wrap model methods', function () {
         var model = new UserModel();
-        MONGOOSE_MODEL_METHODS.forEach(function (funcName) {
+        funcNames.MODEL_METHODS.forEach(function (funcName) {
             debug(funcName);
             assert(typeof model[customMapper(funcName)] === 'function');
         });
     });
     it('should wrap query methods', function () {
         var query = UserModel.find();
-        MONGOOSE_QUERY_METHODS.forEach(function (funcName) {
+        funcNames.QUERY_METHODS.forEach(function (funcName) {
             debug(funcName);
             assert(typeof query[customMapper(funcName)] === 'function');
         });
     });
     it('should wrap aggregate methods', function () {
         var aggregate = UserModel.aggregate();
-        MONGOOSE_AGGREGATE_METHODS.forEach(function (funcName) {
+        funcNames.AGGREGATE_METHODS.forEach(function (funcName) {
             debug(funcName);
             assert(typeof aggregate[customMapper(funcName)] === 'function');
         });
@@ -107,6 +65,8 @@ describe('mongooseq', function () {
             .then(function (result) {
                 debug('Model#populate-->', result);
                 assert.ok(result);
+                assert.ok(result.author._id);
+                assert.ok(result.author.name);
             })
             .catch(assert.ifError)
             .done(done);
@@ -131,21 +91,22 @@ describe('mongooseq', function () {
             .catch(assert.ifError)
             .done(done);
     });
+    // NOTE: since mongoose 4.x: update only returns a result - raw mongo result.
     it('should update', function (done) {
         PostModel.qUpdate({_id: fixtures.posts.p1._id}, { title: 'changed'})
-            .then(function (affectedRows, raw) {
+            .then(function (raw) {
                 debug('Model.update:', arguments);
-                assert.equal(affectedRows, 1);
-                // NOTE: you couldn't get remaing result without 'spread' option!
-                assert.ok(typeof raw === 'undefined');
+                assert.ok(raw);
+                assert.equal(raw.ok, 1);
+                assert.equal(raw.nModified, 1);
             })
             .catch(assert.ifError)
             .done(done);
     });
     it('should save', function (done) {
-        PostSchema.__pre_save_called = false;
-        PostSchema.__post_save_called = false;
         var post = new PostModel();
+        post.__pre_save_called = false;
+        post.__post_save_called = false;
         post.title = 'new-title';
         post.author = fixtures.users.u1._id;
         assert.ok(post.isNew);
@@ -157,19 +118,18 @@ describe('mongooseq', function () {
                 assert.ok(result._id);
                 assert.equal(result.title, 'new-title');
                 assert.equal(result.author.toString(), fixtures.users.u1._id.toString());
-                // NOTE: you couldn't get remaing result without 'spread' option!
+                // NOTE: you couldn't get remaining result without 'spread' option!
                 assert.ok(typeof affectedRows === 'undefined');
             })
             .catch(assert.ifError)
             .done(function () {
-                assert(PostSchema.__pre_save_called && PostSchema.__post_save_called);
+                assert(post.__pre_save_called && post.__post_save_called);
                 done();
             });
     });
     it('should aggregate', function (done) {
         // fix issue6
         var agg = UserModel.aggregate();
-        console.log('****************', agg);
         agg
             .match({name: {$regex: '^b.*' }})
             .qExec()
@@ -190,6 +150,30 @@ describe('mongooseq', function () {
                 debug('users:', users);
                 assert.ok(user);
                 assert.ok(users);
+            })
+            .catch(assert.ifError)
+            .done(done);
+    });
+    it('should assert issue22', function (done) {
+        PostModel.qFindById(fixtures.posts.p1._id)
+            .then(function (result) {
+                debug('Model.findById-->', result);
+                assert.ok(result);
+                return result.qPopulate([
+                    {path:'author'},
+                    {path:'comments.author'}
+                ]);
+            })
+            .then(function (result) {
+                debug('Model#populate author-->', result.author);
+                assert.ok(result);
+                assert.ok(result.author._id);
+                assert.ok(result.author.name);
+                result.comments.forEach(function (comment) {
+                    debug('Model#populate comments.author-->', comment.author);
+                    assert.ok(comment.author._id);
+                    assert.ok(comment.author.name);
+                });
             })
             .catch(assert.ifError)
             .done(done);
